@@ -1,0 +1,13 @@
+pandas
+numpy
+scikit-learn
+torch
+sentence-transformers
+faiss-cpu
+scikit-surprise
+mlflow
+scipy
+tqdm
+matplotlib
+seaborn
+jupyter
