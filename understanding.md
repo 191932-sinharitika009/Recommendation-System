@@ -32,9 +32,40 @@ Running log of what was built, why each decision was made, and key concepts per 
 
 ---
 
-## Phase 1: Data & EDA 🔲
+## Phase 1: Data & EDA ✅
 
-_To be filled after Phase 1 is complete._
+### What we did
+- Created `notebooks/01_eda.ipynb` with 10 sections covering the full dataset
+- Verified data loads correctly via `src/data.py`
+- Ran train/val/test split and saved CSVs to `data/`
+
+### Dataset facts (MovieLens-1M)
+| Stat | Value |
+|------|-------|
+| Users | 6,040 |
+| Movies | ~3,706 unique rated |
+| Ratings | 1,000,209 |
+| Sparsity | ~95%+ |
+| Avg ratings/user | ~165 |
+| Avg ratings/movie | ~270 |
+
+### Key observations from EDA
+- **Long-tail**: a small % of popular movies get the majority of ratings; most movies have very few. This is the core challenge in RecSys — being useful beyond the top-10 blockbusters
+- **Rating skew**: users tend to rate movies they liked (selection bias). The average rating is above 3.5, not 3.0
+- **Cold-start users**: users with < 20 ratings need special handling — covered in Phase 10
+- **Genre**: Drama and Comedy dominate the catalog
+
+### Split strategy: per-user temporal split
+- Each user's ratings sorted by timestamp
+- Last 10% → test, next 10% → val, rest → train
+- **Why temporal and not random?** Random split can leak future ratings into training — e.g., a user's 2001 rating influences their 2000 profile. Temporal split mirrors real deployment where you always predict future behavior from past history
+- **Why per-user?** Guarantees every user has training data. A global random split could leave some users entirely in test with no train signal
+
+### Sparsity intuition
+- 95%+ sparsity means the user-item matrix is almost entirely zeros
+- Out of 6040 × 3953 = ~23.9M possible ratings, only ~1M exist
+- This is why collaborative filtering is hard — you must predict from very sparse signal
+- CSR (Compressed Sparse Row) format stores only non-zero values efficiently
 
 ---
 
