@@ -151,9 +151,46 @@ The model overfits after epoch 2 (train RMSE → 0.51, val RMSE → 1.12). At ep
 
 ---
 
-## Phase 4: Content-Based Recommender 🔲
+## Phase 4: Content-Based Recommender ✅
 
-_To be filled after Phase 4 is complete._
+### What we did
+- Implemented `TFIDFRecommender` and `SentenceTransformerRecommender` in `src/content.py`
+- Created `notebooks/04_content.ipynb` — fits both, shows recommendations with titles, evaluates Precision@10
+
+### How each model works
+
+**TF-IDF Recommender**
+1. Build corpus: `genres (pipe → space) + title` for each movie
+2. Fit `TfidfVectorizer(max_features=500)` → sparse item matrix (3883 × 500)
+3. User profile = weighted mean of TF-IDF vectors for rated items (weights = `rating − 2.5`, centred at 0)
+4. Score candidates via cosine similarity between profile and all item vectors
+5. Return top-N, excluding seen items
+
+**Sentence-Transformer Recommender**
+1. Same corpus, encoded with `all-MiniLM-L6-v2` → dense (3883 × 384) float32 matrix
+2. Embeddings L2-normalised so scoring = dot product (= cosine similarity)
+3. User profile built the same way (weighted mean, then normalise)
+4. Score = `item_embs @ profile` — fast matrix-vector product
+
+### Results
+| Model | Precision@10 |
+|---|---|
+| User-User CF | 0.0015 |
+| Matrix Factorization | 0.0070 |
+| Sentence-Transformer | 0.0060 |
+| TF-IDF Content | 0.0160 |
+| Item-Item CF | 0.0855 |
+
+### Why TF-IDF beats Sentence-Transformer here
+Genre + title text is short and keyword-heavy ("Action Comedy Drama"). TF-IDF excels at exact keyword matching. Sentence-Transformers are trained on rich natural language — they add little value when the "document" is just a list of genre tags. ST would likely win with full movie plot descriptions or review text.
+
+### Why both content models lose to Item-Item CF
+Content models only see what a movie *is* (genres, title). CF models see what users *do* (rating patterns). A user's interaction history is a far stronger signal than genre tags — two users who both love "Toy Story" are similar regardless of whether they also rate "other animated films" highly.
+
+### Concepts to remember
+- **User profile as weighted mean**: subtract 2.5 from ratings before weighting — items rated 5 pull the profile toward them, items rated 1 push the profile away. This is more expressive than a simple mean
+- **Content-based cold start advantage**: content models work for new users (just ask their preferences) and new items (just read the metadata). CF requires prior interactions — this is why hybrid models combine both
+- **L2 normalisation + dot product = cosine similarity**: pre-normalising the item matrix means scoring at inference is a single matrix-vector multiply — very fast
 
 ---
 
