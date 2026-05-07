@@ -137,27 +137,29 @@ class _RatingsDataset(Dataset):
 
 
 class _MFModel(nn.Module):
-    def __init__(self, n_users, n_items, n_factors):
+    def __init__(self, n_users, n_items, n_factors, global_mean=0.0):
         super().__init__()
+        self.global_mean = global_mean
         self.user_emb  = nn.Embedding(n_users, n_factors)
         self.item_emb  = nn.Embedding(n_items, n_factors)
         self.user_bias = nn.Embedding(n_users, 1)
         self.item_bias = nn.Embedding(n_items, 1)
-        nn.init.xavier_uniform_(self.user_emb.weight)
-        nn.init.xavier_uniform_(self.item_emb.weight)
+        # Small init so dot products start near zero; biases learn the mean offset
+        nn.init.normal_(self.user_emb.weight, std=0.01)
+        nn.init.normal_(self.item_emb.weight, std=0.01)
         nn.init.zeros_(self.user_bias.weight)
         nn.init.zeros_(self.item_bias.weight)
 
     def forward(self, user, item):
         dot  = (self.user_emb(user) * self.item_emb(item)).sum(dim=1)
         bias = self.user_bias(user).squeeze(1) + self.item_bias(item).squeeze(1)
-        return dot + bias
+        return self.global_mean + dot + bias
 
 
 class MatrixFactorization:
     """Model-based CF: SGD matrix factorization with biases via PyTorch."""
 
-    def __init__(self, n_factors=64, n_epochs=20, lr=0.005, reg=0.02,
+    def __init__(self, n_factors=64, n_epochs=20, lr=0.005, reg=0.1,
                  batch_size=2048, device=None):
         self.n_factors  = n_factors
         self.n_epochs   = n_epochs
@@ -174,10 +176,13 @@ class MatrixFactorization:
     def fit(self, train_df, val_df=None):
         self.n_users = train_df["userId"].max()
         self.n_items = train_df["movieId"].max()
+        global_mean  = float(train_df["rating"].mean())
 
-        self.model = _MFModel(self.n_users, self.n_items, self.n_factors).to(self.device)
+        self.model = _MFModel(self.n_users, self.n_items, self.n_factors,
+                              global_mean).to(self.device)
+        # weight_decay=0: L2 reg applied manually in loss so it only hits embeddings
         optimizer  = torch.optim.Adam(self.model.parameters(), lr=self.lr,
-                                      weight_decay=self.reg)
+                                      weight_decay=0.0)
         criterion  = nn.MSELoss()
 
         train_loader = DataLoader(_RatingsDataset(train_df),
@@ -193,10 +198,14 @@ class MatrixFactorization:
                                          ratings.to(self.device))
                 optimizer.zero_grad()
                 preds = self.model(users, items)
-                loss  = criterion(preds, ratings)
+                mse   = criterion(preds, ratings)
+                # Explicit L2 reg on embeddings only (not biases)
+                l2 = (self.model.user_emb(users).pow(2).mean() +
+                      self.model.item_emb(items).pow(2).mean())
+                loss = mse + self.reg * l2
                 loss.backward()
                 optimizer.step()
-                total_loss += loss.item() * len(ratings)
+                total_loss += mse.item() * len(ratings)
                 n += len(ratings)
             train_rmse = (total_loss / n) ** 0.5
             self.history["train_loss"].append(train_rmse)
