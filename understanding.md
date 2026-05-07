@@ -114,9 +114,40 @@ Both models avoid Python loops over items/users. The critical operations are mat
 
 ---
 
-## Phase 3: Model-Based Collaborative Filtering 🔲
+## Phase 3: Model-Based Collaborative Filtering ✅
 
-_To be filled after Phase 3 is complete._
+### What we did
+- Added `MatrixFactorization` class (and helpers `_MFModel`, `_RatingsDataset`) to `src/cf.py`
+- Created `notebooks/03_mf.ipynb` — trains 20 epochs, plots learning curve, evaluates Precision@10
+
+### How it works
+**Architecture:** Each user and item gets a latent vector of size `n_factors=64`. Predicted rating = `global_mean + user_emb · item_emb + user_bias + item_bias`
+
+**Training:**
+- Loss = MSE + explicit L2 reg on embeddings only (not biases)
+- Optimizer: Adam with `lr=0.005`, `weight_decay=0` (reg applied manually in loss)
+- Global mean baked into model so predictions start near ~3.58 instead of 0
+- Mini-batch SGD with `batch_size=2048`
+
+**Bug we fixed:** Original code used `weight_decay=0.02` inside Adam directly. Adam's weight_decay is too aggressive compared to SGD — it collapsed embeddings toward zero, keeping RMSE stuck at 3.3 for all 20 epochs. Fix: set `weight_decay=0` in Adam, add `reg * (user_emb.pow(2).mean() + item_emb.pow(2).mean())` to the loss manually.
+
+### Results
+| Model | Precision@10 | Val RMSE |
+|---|---|---|
+| User-User CF | 0.0015 | — |
+| Item-Item CF | 0.0855 | — |
+| Matrix Factorization | 0.0070 | 0.8822 (best at epoch 2) |
+
+Training time: ~410s on CPU for 20 epochs over 805K ratings.
+
+### Why MF still loses to Item-Item CF on P@10
+The model overfits after epoch 2 (train RMSE → 0.51, val RMSE → 1.12). At epoch 20, it scores obscure items very highly (because rare user-item pairs dominate gradient updates), producing recommendations that look off. Early stopping at epoch 2 would give ~0.88 val RMSE and better ranking quality.
+
+### Concepts to remember
+- **Matrix Factorization**: decomposes the sparse user-item matrix into two dense matrices (U × F and I × F). The dot product of a user and item vector gives the predicted rating
+- **Global mean + biases**: without these, predictions start at 0 while actual ratings are 1–5. The model wastes early epochs just learning the mean shift
+- **weight_decay in Adam vs SGD**: in SGD, weight_decay=0.02 is mild. In Adam, it interacts with the adaptive learning rates and can be 10× more aggressive — always use manual L2 reg in the loss when using Adam for RecSys
+- **Overfitting in MF**: the model has `n_users * n_factors + n_items * n_factors` parameters (~640K for this dataset). With 800K training samples, it overfits quickly. Solutions: early stopping, dropout on embeddings, or lower n_factors
 
 ---
 
