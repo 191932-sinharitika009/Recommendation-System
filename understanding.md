@@ -194,9 +194,38 @@ Content models only see what a movie *is* (genres, title). CF models see what us
 
 ---
 
-## Phase 5: FAISS ANN Index 🔲
+## Phase 5: FAISS ANN Index ✅
 
-_To be filled after Phase 5 is complete._
+### What we did
+- Implemented `FAISSRetriever` and `two_stage_recommend` in `src/retrieval.py`
+- Created `notebooks/05_faiss.ipynb` — builds index, benchmarks latency, runs two-stage pipeline
+
+### How it works
+
+**Index: HNSW (Hierarchical Navigable Small World)**
+- Graph-based ANN structure where each node connects to M=32 neighbours
+- At build time, `ef_construction=200` controls beam width (more = better graph, slower build)
+- At query time, `ef_search=50` controls recall vs speed trade-off
+- Metric: inner product on L2-normalised vectors = cosine similarity
+- Build: 0.19s for 3,883 vectors (d=384)
+
+**Two-stage pipeline**
+1. **Stage 1 — Retrieve**: FAISS returns top-50 candidate movie IDs in ~0.24ms
+2. **Stage 2 — Re-rank**: a slower, exact scorer (e.g. hybrid model) re-scores only those 50 candidates and returns top-N
+
+### Results
+| Metric | Value |
+|---|---|
+| Index build time | 0.19s |
+| Retrieval latency (k=50) | 0.238 ms |
+| Queries per second | 4,209 (CPU only) |
+
+### Concepts to remember
+- **Why ANN over exact search**: exhaustive cosine similarity over 1M items takes ~100ms per query. HNSW does it in < 1ms with >95% recall — mandatory at production scale
+- **HNSW vs IVF**: HNSW is graph-based (no training needed, good recall at low k). IVF (Inverted File Index) clusters vectors first (requires training, faster at very large scale). For < 1M items, HNSW is the default choice
+- **efSearch trade-off**: higher efSearch → higher recall → higher latency. Tune based on SLA (e.g. p99 < 10ms)
+- **L2-normalise before indexing**: converts inner product to cosine similarity. Do this once at build time so queries don't need to know the normalisation happened
+- **Two-stage is the production pattern**: retrieval (cheap, approximate, runs on all items) feeds a re-ranker (expensive, exact, runs on ~50–200 candidates). This decouples scale from quality
 
 ---
 
