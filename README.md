@@ -67,7 +67,17 @@ Evaluated on 200 validation users (temporal per-user split).
 
 ## A/B Test
 
-Compares CF-only (control) vs. Hybrid (treatment) with statistical significance (t-test, p < 0.05).
+| Experiment | Lift | p-value | Significant |
+|---|---|---|---|
+| CF vs Hybrid α=0.6 | +0.87% | 0.88 | No |
+| CF vs Hybrid α=0.8 | +3.68% | 0.39 | No |
+| MF vs Item-Item CF | +132.5% | ~0.0 | **Yes** |
+
+## Cold-Start
+
+Three-tier fallback: cold (<20 ratings) → popularity, warm (20–49) → TF-IDF content, active (50+) → CF.
+
+> On MovieLens-1M even "cold" users have 20+ training ratings — CF outperforms the fallbacks. Cold-start strategies provide lift only for truly new users (0–5 ratings), which this dataset cannot simulate.
 
 ## Experiment Tracking
 

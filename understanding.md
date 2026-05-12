@@ -381,12 +381,95 @@ MF NDCG@10 was 0.0877 in Phase 7 but 0.1073 here. Embeddings are randomly initia
 
 ---
 
-## Phase 9: MLflow Experiment Tracking 🔲
+## Phase 9: MLflow Experiment Tracking ✅
 
-_To be filled after Phase 9 is complete._
+### What we did
+- Integrated `mlflow.log_params()` and `mlflow.log_metrics()` into `notebooks/09_mlflow.ipynb`
+- Logged 6 model evaluation runs + 2 A/B test runs into a local MLflow experiment called `recsys-movielens-1m`
+- Fixed MLflow constraint: metric names cannot contain `@` — added `mlflow_safe()` helper that replaces `@` with `_at_` (e.g. `ndcg@10` → `ndcg_at_10`)
+- Runs stored in `mlflow_runs/` (gitignored — local only)
+
+### What MLflow is
+MLflow is a **pre-built open-source experiment tracking tool** by Databricks. We did not build the dashboard — we wrote the logging calls that feed data into it.
+
+- `mlflow.set_experiment()` — creates or selects a named experiment
+- `mlflow.start_run(run_name=...)` — opens a new run (context manager, auto-closes)
+- `mlflow.log_params({...})` — records hyperparameters (strings/numbers, immutable per run)
+- `mlflow.log_metrics({...})` — records evaluation scores (must be numeric, no `@` in keys)
+- `mlflow ui --port 5000` — launches a local Flask server; open `http://localhost:5000` to see the dashboard
+
+### What was logged
+
+| Run name | Type | Key metrics |
+|---|---|---|
+| user-user-cf | model eval | ndcg_at_10=0.0065, map=0.0004 |
+| item-item-cf | model eval | ndcg_at_10=0.2495, map=0.0371 |
+| matrix-factorization | model eval | ndcg_at_10=0.0877, map=0.0082 |
+| tfidf-content | model eval | ndcg_at_10=0.0597, map=0.0045 |
+| sentence-transformer | model eval | ndcg_at_10=0.0271, map=0.0021 |
+| hybrid-alpha-1.0 | model eval | ndcg_at_10=0.2495, map=0.0371 |
+| ab-cf-vs-hybrid-0.6 | A/B test | lift=+0.87%, p=0.88 |
+| ab-cf-vs-hybrid-0.8 | A/B test | lift=+3.68%, p=0.39 |
+
+### Local vs production MLflow
+- **Local (this project):** tracking URI = `file:///mlflow_runs/` — all data on disk, only you can see it
+- **Production (real teams):** tracking URI points to a shared remote server (e.g. `http://mlflow.company.com`) backed by a database (PostgreSQL) and artifact store (S3). The whole team sees every experiment run, enabling reproducibility and model governance
+
+### Concepts to remember
+- **Params vs metrics**: params are hyperparameters set before training (immutable, strings ok); metrics are evaluation results (must be numeric, logged after evaluation)
+- **Why experiment tracking matters**: without it you lose track of which config gave which result — after 10+ model runs, impossible to reproduce the best one. MLflow solves this
+- **`mlflow_runs/` is gitignored**: experiment artifacts (model weights, plots) can be large. Only code is committed; runs are reproduced locally by re-running notebooks
+- **Interview answer**: *"I used MLflow to track all experiments — params, metrics, and A/B results — so every run is reproducible. In production this would point to a shared tracking server so the whole team has visibility."*
 
 ---
 
-## Phase 10: Cold-Start Strategies 🔲
+## Phase 10: Cold-Start Strategies ✅
 
-_To be filled after Phase 10 is complete._
+### What we did
+- Implemented `ColdStartRecommender` and `build_popularity()` in `src/coldstart.py`
+- Created `notebooks/10_coldstart.ipynb` — buckets all val users by training ratings, evaluates NDCG@10 and P@10 per bucket for ColdStartRecommender vs plain ItemItemCF
+- Fixed a `ZeroDivisionError` in `src/content.py`: `np.average(..., weights=w)` divides by `sum(w)` which can hit zero due to float32 cancellation when ratings perfectly average to 2.5. Fix: replaced with `np.dot(weights, vecs)` (weighted sum — no division, safe for all weight combinations)
+
+### How it works
+Three-tier fallback based on number of training ratings:
+
+| Tier | Threshold | Strategy |
+|---|---|---|
+| Cold | < 20 ratings | Globally popular items (sorted by n_ratings in train) |
+| Warm | 20–49 ratings | TF-IDF content-based (genre + title) |
+| Active | 50+ ratings | Item-Item CF |
+
+### Results (all val users, ~6,040 users)
+
+| Bucket | n_users | CF NDCG@10 | ColdStart NDCG@10 | Lift |
+|---|---|---|---|---|
+| cold (<20) | 335 | 0.1199 | 0.0420 | **-65%** |
+| warm (20-49) | 1,825 | 0.1534 | 0.0385 | **-75%** |
+| moderate (50-99) | 1,407 | 0.1966 | 0.1966 | 0% |
+| active (100+) | 2,473 | 0.3146 | 0.3146 | 0% |
+
+### The key finding: cold-start hurts on MovieLens-1M
+
+Cold-start **degrades** performance for cold and warm users. This is counterintuitive but correct.
+
+**Why:** MovieLens-1M users all have at least ~20 training ratings after temporal split. Even "cold" users (17 train ratings) have enough interaction history for Item-Item CF to work well (NDCG@10=0.1199). Replacing CF with popularity (0.0420) or TF-IDF (0.0385) throws away valid CF signal.
+
+**Cold-start would only help for truly new users (0–5 ratings)**, which this dataset cannot simulate — everyone has history. In a real production system:
+- Day 0 user (0 ratings): popularity is the only option; CF has nothing to work with
+- After 3–5 ratings: content/genre gives a personalised signal before CF kicks in
+- After 20+ ratings: CF takes over
+
+### What the sample recommendations showed
+
+| Tier | User | n_train | Recommendations |
+|---|---|---|---|
+| Cold | User 4 | 17 | Popular films: American Beauty, T2, Matrix, Back to the Future, Silence of the Lambs |
+| Warm | User 1 | 43 | TF-IDF genre match: animated children's films (Hunchback, Hercules, Pocahontas) |
+| Active | User 2 | 105 | CF: Fargo, Star Wars, Pulp Fiction, Men in Black, Schindler's List |
+
+### Concepts to remember
+- **Cold-start problem**: new users/items have no interaction history, making CF impossible. Three standard strategies: (1) popularity fallback, (2) content-based, (3) ask for explicit preferences (onboarding quiz)
+- **Dataset limitation**: offline datasets like MovieLens-1M cannot evaluate true cold-start since every user has a history. Real cold-start evaluation requires holdout of users' first interactions
+- **CF is robust even for sparse users**: Item-Item similarity is computed at the item level across all users — even users with few ratings benefit from the global item similarity matrix
+- **The content model's weakness on sparse users**: TF-IDF recommends by genre similarity, not by the user's actual rating patterns. "User 1 watched 2 kids films" → recommends all kids films regardless of whether that fits the user's broader taste
+- **Interview answer**: *"Cold-start matters most at 0–5 interactions. On MovieLens-1M, even 'cold' users have 20 training ratings — enough for CF to dominate. In production, I'd use popularity for day-1 users, content after 5 interactions, and CF after 20."*

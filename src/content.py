@@ -51,11 +51,11 @@ class TFIDFRecommender:
         if len(idxs) == 0:
             return None
 
-        weights = ratings - 2.5   # centre around 0
+        weights = (ratings - 2.5) + 1e-8   # centre around 0; +eps avoids zero sum
         vecs    = self.item_vectors[idxs].toarray()
-        profile = np.average(vecs, axis=0, weights=weights + 1e-8)
+        profile = np.dot(weights, vecs)    # weighted sum — never divides, safe with any weights
         norm    = np.linalg.norm(profile)
-        return profile / norm if norm > 0 else profile
+        return (profile / norm).astype(np.float32) if norm > 0 else None
 
     def recommend(self, user_id, train_df, n=10):
         profile = self._user_profile(user_id, train_df)
@@ -119,11 +119,11 @@ class SentenceTransformerRecommender:
         if len(idxs) == 0:
             return None
 
-        weights = ratings - 2.5
+        weights = (ratings - 2.5) + 1e-8
         vecs    = self.item_embs[idxs]
-        profile = np.average(vecs, axis=0, weights=weights + 1e-8)
+        profile = np.dot(weights, vecs)    # weighted sum — safe with any weights
         norm    = np.linalg.norm(profile)
-        return (profile / norm).astype(np.float32) if norm > 0 else profile
+        return (profile / norm).astype(np.float32) if norm > 0 else None
 
     def recommend(self, user_id, train_df, n=10):
         profile = self._user_profile(user_id, train_df)
