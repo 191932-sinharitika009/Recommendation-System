@@ -337,9 +337,47 @@ NDCG@10=0.2495 means the model achieves ~25% of perfect ranking quality — stro
 
 ---
 
-## Phase 8: A/B Testing Framework 🔲
+## Phase 8: A/B Testing Framework ✅
 
-_To be filled after Phase 8 is complete._
+### What we did
+- Implemented `ABTestFramework` in `src/ab_test.py` — accepts any two `recommend_fn` callables, computes per-user NDCG@10, runs a paired t-test, returns lift %, p-value, significance flag, and 95% CI
+- Created `notebooks/08_ab_test.ipynb` — ran 3 experiments comparing models
+
+### How it works
+1. For each user in the sample, compute the metric (NDCG@10 by default) for both control and treatment
+2. This gives two arrays of per-user scores — one per model
+3. Run a **paired t-test** (`scipy.stats.ttest_rel`): each user's control score is compared to their treatment score
+4. Report: control mean, treatment mean, lift %, p-value, significance (p < 0.05), 95% CI on the mean difference
+
+**Why paired t-test?** Each user sees both models (offline simulation), so we can subtract out individual user difficulty. A user who is generally hard to recommend for will have low scores on both models — the paired test removes this noise and is more statistically powerful than an independent t-test.
+
+### Results
+
+| Experiment | Control | Treatment | Control NDCG@10 | Treatment NDCG@10 | Lift | p-value | Significant |
+|---|---|---|---|---|---|---|---|
+| 1 | Item-Item CF | Hybrid α=0.6 | 0.2495 | 0.2517 | +0.87% | 0.8804 | No |
+| 2 | Item-Item CF | Hybrid α=0.8 | 0.2495 | 0.2587 | +3.68% | 0.3879 | No |
+| 3 | MF (epoch 2) | Item-Item CF | 0.1073 | 0.2495 | +132.55% | ~0.0 | **Yes** |
+
+### Key insights
+
+**Experiments 1 & 2 — hybrid is not significantly different from pure CF**
+Both hybrids show small positive lifts (+0.87% and +3.68%), but neither is statistically significant (p=0.88, p=0.39). The 95% CI straddles zero in both cases, meaning we cannot conclude the treatment is better or worse. This is a **"no-ship" decision**: there is no evidence the hybrid helps, so deploying it adds complexity with no confirmed gain.
+
+**This contradicts Phase 6's P@10 sweep** — which showed content signal hurts. NDCG@10 tells a slightly different story: content might be nudging relevant items higher *within* the top-10 even when it doesn't add new relevant items. P@10 is blind to ordering within top-K; NDCG is not. With more users (n=2000+), the α=0.8 blend might reach significance.
+
+**Experiment 3 — ItemItemCF significantly outperforms MF**
++132% lift with p≈0 and a 95% CI entirely above zero (0.0965, 0.1879). This is a **definitive result**: ItemItemCF is unambiguously better than MF at 2 epochs on this dataset. The effect size is so large that 200 users is more than enough to detect it.
+
+**MF variance across runs**
+MF NDCG@10 was 0.0877 in Phase 7 but 0.1073 here. Embeddings are randomly initialized and mini-batch SGD is stochastic — with only 2 epochs the model has high run-to-run variance. Lesson: report mean ± std over multiple seeds for fair model comparison.
+
+### Concepts to remember
+- **Paired vs independent t-test**: paired removes user-level variance (same users see both arms). Independent is used when different users are assigned to control and treatment (real online A/B test). Paired is more powerful but requires the same user pool
+- **Statistical significance ≠ practical significance**: a +0.87% lift might be real but not worth the engineering cost of maintaining a hybrid system. Always report effect size alongside p-value
+- **p-value interpretation**: p=0.39 means "if the models were equal, we'd see a difference this large 39% of the time by chance" — not evidence for the hybrid being equal, just insufficient evidence it's better
+- **Sample size matters**: with n=200, only large effects (like MF vs CF, +132%) are detectable. Small effects (< 5% lift) require n=1000+ users to achieve 80% statistical power
+- **95% CI**: the interval (-0.0117, 0.0301) for Exp 2 shows the true mean difference is probably between -1.2% and +3% — ambiguous, not actionable
 
 ---
 
