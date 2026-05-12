@@ -277,9 +277,63 @@ Best alpha = 1.0 — the hybrid does not improve over pure Item-Item CF.
 
 ---
 
-## Phase 7: Offline Evaluation 🔲
+## Phase 7: Offline Evaluation ✅
 
-_To be filled after Phase 7 is complete._
+### What we did
+- Implemented `dcg_at_k`, `ndcg_at_k`, `recall_at_k`, `precision_at_k`, `average_precision`, and `evaluate_model` in `src/evaluate.py` from scratch
+- Created `notebooks/07_evaluate.ipynb` — fits all 6 models, runs full metric comparison, saves bar chart
+
+### Metrics explained (implemented from scratch)
+
+**NDCG@K (Normalized Discounted Cumulative Gain)**
+- Rewards relevant items ranked *higher* in the list via a log₂ discount
+- `DCG@K = Σ relevance_i / log₂(i+1)` for positions i=1..K
+- Normalized by IDCG (ideal DCG — what you'd get if all relevant items were at the top)
+- Range [0,1]; 1.0 = perfect ranking. Most informative single metric for ranking quality
+
+**MAP (Mean Average Precision)**
+- For each relevant item found in the list, compute precision at that position, then average
+- `AP = Σ precision@i / |relevant|` across hit positions
+- Averaged over all users = MAP
+- Strictest metric — penalizes any gap between relevant items in the ranked list
+
+**Recall@K**
+- Fraction of the user's ground-truth items found in top-K
+- `Recall@K = |recommended ∩ relevant| / |relevant|`
+- Shows how much of the "correct answer" your list recovers
+
+**Precision@K**
+- Fraction of your top-K that are actually relevant
+- Trade-off with Recall: higher K → higher Recall, lower Precision
+
+### Results (200 val users)
+| Model | NDCG@5 | NDCG@10 | MAP | Recall@5 | Recall@10 | P@10 |
+|---|---|---|---|---|---|---|
+| User-User CF | 0.0032 | 0.0065 | 0.0004 | 0.0007 | 0.0013 | 0.0015 |
+| Item-Item CF | **0.2099** | **0.2495** | **0.0371** | **0.0521** | **0.0871** | **0.0855** |
+| Matrix Factorization | 0.0725 | 0.0877 | 0.0082 | 0.0141 | 0.0253 | 0.0265 |
+| TF-IDF Content | 0.0441 | 0.0597 | 0.0045 | 0.0072 | 0.0126 | 0.0160 |
+| Sentence-Transformer | 0.0196 | 0.0271 | 0.0021 | 0.0047 | 0.0066 | 0.0060 |
+| Hybrid (α=1.0) | 0.2099 | 0.2495 | 0.0371 | 0.0521 | 0.0871 | 0.0855 |
+
+### Key insights
+
+**MF jumps to 2nd place under NDCG**
+Phase 3 reported P@10=0.0070 for MF (20 epochs, overfit). Phase 7 uses n_epochs=2 (early stopping at best val RMSE=0.8822). Early stopping prevents the model from over-scoring obscure items, giving dramatically better ranking quality: P@10=0.0265, NDCG@10=0.0877. **Lesson: always evaluate ranking quality, not just RMSE.**
+
+**NDCG vs Precision tell different stories**
+- P@10 only checks if relevant items are in the top-10 (binary)
+- NDCG@10 also checks *where* in the top-10 they land — an item at rank 1 is worth log₂(3)≈1.58× more than one at rank 2
+- This makes NDCG a much richer signal for ranking model quality
+
+**Item-Item CF dominates across every metric**
+NDCG@10=0.2495 means the model achieves ~25% of perfect ranking quality — strong for a simple memory-based approach with no training. The gap to MF (0.0877) shows how powerful nearest-neighbor methods are on dense datasets.
+
+### Concepts to remember
+- **DCG discount = log₂(position+1)**: position 1 → log₂(2)=1 (no discount), position 10 → log₂(11)≈3.46 (strong discount). The log makes early positions exponentially more valuable
+- **Why MAP is stricter than NDCG**: MAP requires relevant items to appear *compactly* near the top. NDCG tolerates spreading them out as long as they're individually ranked high
+- **Early stopping is critical for MF**: train RMSE and val RMSE diverge fast (epoch 2 best). A model that minimizes rating error (RMSE) doesn't necessarily maximize ranking quality (NDCG) — these are different objectives
+- **Recall@K grows with K**: always report the K you chose and justify it (K=10 is standard for "top recommendations"; K=100 for candidate generation stages)
 
 ---
 

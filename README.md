@@ -45,18 +45,18 @@ http://files.grouplens.org/datasets/movielens/ml-1m.zip
 
 ## Results
 
-Evaluated on 200 validation users (Precision@10). Full NDCG/MAP/Recall metrics coming in Phase 7.
+Evaluated on 200 validation users (temporal per-user split).
 
-| Model                    | P@10   | Notes |
-|--------------------------|--------|-------|
-| User-User CF             | 0.0015 | Noisy on sparse users |
-| Item-Item CF             | 0.0855 | Best single model |
-| Matrix Factorization     | 0.0070 | PyTorch, 64 factors, best val RMSE=0.8822 |
-| TF-IDF Content           | 0.0160 | Genres + title, 500 features |
-| Sentence-Transformer     | 0.0060 | all-MiniLM-L6-v2, d=384 |
-| **Hybrid (α=1.0)**       | **0.0855** | CF dominates on dense MovieLens-1M |
+| Model | NDCG@10 | MAP | Recall@10 | P@10 |
+|---|---|---|---|---|
+| User-User CF | 0.0065 | 0.0004 | 0.0013 | 0.0015 |
+| Item-Item CF | **0.2495** | **0.0371** | **0.0871** | **0.0855** |
+| Matrix Factorization | 0.0877 | 0.0082 | 0.0253 | 0.0265 |
+| TF-IDF Content | 0.0597 | 0.0045 | 0.0126 | 0.0160 |
+| Sentence-Transformer | 0.0271 | 0.0021 | 0.0066 | 0.0060 |
+| **Hybrid (α=1.0)** | **0.2495** | **0.0371** | **0.0871** | **0.0855** |
 
-> Content signal adds noise on this dense dataset. Alpha tuning showed monotonic improvement toward pure CF — content would provide lift on sparser datasets or cold-start users (see Phase 10).
+> Content signal adds noise on dense MovieLens-1M — alpha tuning converges to pure CF. Matrix Factorization ranks 2nd under NDCG when early-stopped at epoch 2 (best val RMSE=0.8822).
 
 ### FAISS Retrieval (Phase 5)
 | Metric | Value |
