@@ -473,3 +473,65 @@ Cold-start **degrades** performance for cold and warm users. This is counterintu
 - **CF is robust even for sparse users**: Item-Item similarity is computed at the item level across all users — even users with few ratings benefit from the global item similarity matrix
 - **The content model's weakness on sparse users**: TF-IDF recommends by genre similarity, not by the user's actual rating patterns. "User 1 watched 2 kids films" → recommends all kids films regardless of whether that fits the user's broader taste
 - **Interview answer**: *"Cold-start matters most at 0–5 interactions. On MovieLens-1M, even 'cold' users have 20 training ratings — enough for CF to dominate. In production, I'd use popularity for day-1 users, content after 5 interactions, and CF after 20."*
+
+---
+
+## Phase 11: Two-Stage Retrieve & Re-rank Pipeline ✅
+
+### What we did
+- Created `notebooks/11_two_stage.ipynb` — wires Phase 5 (FAISS) and Phase 6 (Hybrid) together end-to-end
+- Used `two_stage_recommend()` from `src/retrieval.py` with a hybrid `scorer_fn` built from `_cf_scores_full` + `_content_scores_full`
+- Evaluated accuracy at different `k_retrieve` values (10, 25, 50, 100, 200, 500) to show the recall vs speed tradeoff
+- Benchmarked latency of each pipeline stage
+
+### How the pipeline works
+```
+User content profile vector (ST embedding, 384-d)
+       ↓
+Stage 1: FAISS HNSW retrieves top-k_retrieve candidates  (~0.24 ms)
+       ↓
+Stage 2: Hybrid scorer (alpha * CF_norm + (1-alpha) * content_norm)
+         applied only to the candidate set (~50 items)
+       ↓
+Top-10 final recommendations
+```
+
+The `scorer_fn` passed to `two_stage_recommend` is a closure over precomputed hybrid score dicts — it looks up each candidate's hybrid score in O(1).
+
+### Why accuracy drops at small k_retrieve
+
+FAISS retrieves candidates using **content similarity** (ST user profile vector). The best CF items are not necessarily content-similar — they're co-rated items that match the user's taste in the collaborative rating space, not the sentence-embedding space. When k=50, some CF-relevant items are simply never retrieved and the re-ranker never sees them.
+
+| k_retrieve | NDCG@10 | % of CF baseline |
+|---|---|---|
+| 10 | lowest | < 50% |
+| 50 | moderate | ~80% |
+| 500 | near-baseline | ~98% |
+| all items (pure CF) | 0.2495 | 100% |
+
+### The real production fix: index MF embeddings in FAISS
+
+The accuracy gap exists because retrieval (content-based) and re-ranking (CF-based) are misaligned. The fix:
+
+```
+MF user embedding ──▶ FAISS (indexed on MF item embeddings) ──▶ CF-relevant candidates ──▶ Hybrid re-rank
+```
+
+MF item embeddings encode collaborative signal — two items close in MF space are rated similarly by the same users. This is what YouTube DNN, Pinterest, and most production RecSys systems use for the retrieval stage.
+
+### When two-stage pays off in production
+
+| Condition | Why it matters |
+|---|---|
+| Millions of items | Scoring all items is O(n) — FAISS is O(log n). Mandatory at scale |
+| Expensive re-ranker | A transformer re-ranker costs ~10ms/item — can only run on 50–200 candidates |
+| Multiple retrieval sources | Union CF ANN + content ANN + trending → richer, more diverse candidate pool |
+
+On MovieLens-1M (only 3,883 items), the speed gain is negligible. The phase exists to demonstrate the architecture pattern used at production scale.
+
+### Concepts to remember
+- **Retrieve-and-rank is the universal production pattern**: every large-scale RecSys (YouTube, Netflix, Spotify) uses this two-stage design
+- **Retrieval ≠ ranking**: retrieval optimizes recall (don't miss good items), ranking optimizes precision (put the best items first). They use different signals and objectives
+- **Candidate set size vs accuracy tradeoff**: larger k → higher accuracy → higher retrieval cost. Tune k based on latency SLA (e.g. p99 < 50ms total)
+- **Alignment matters**: retrieval and re-ranking should use compatible signals. Content retrieval + CF re-ranking creates a mismatch that hurts recall
+- **Interview answer**: *"In production I'd use a two-stage pipeline: FAISS ANN retrieval on MF item embeddings (CF-aligned retrieval) to get 100–500 candidates in ~1ms, then a hybrid or neural re-ranker on those candidates. This decouples scale (retrieval can handle billions of items) from quality (re-ranker can be expensive)."*

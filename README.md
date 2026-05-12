@@ -79,6 +79,29 @@ Three-tier fallback: cold (<20 ratings) → popularity, warm (20–49) → TF-ID
 
 > On MovieLens-1M even "cold" users have 20+ training ratings — CF outperforms the fallbacks. Cold-start strategies provide lift only for truly new users (0–5 ratings), which this dataset cannot simulate.
 
+## Two-Stage Pipeline (Phase 11)
+
+Connects Phase 5 (FAISS) and Phase 6 (Hybrid) end-to-end:
+
+```
+User profile vector
+       ↓
+FAISS HNSW retrieves top-K candidates  (0.24 ms, content-based)
+       ↓
+Hybrid re-ranker scores candidates     (exact CF + content blend)
+       ↓
+Top-10 final recommendations
+```
+
+| k_retrieve | NDCG@10 | vs Baseline |
+|---|---|---|
+| 10 | degrades | < 50% |
+| 50 | moderate loss | ~80% |
+| 500 | near-baseline | ~98% |
+| all items (CF only) | **0.2495** | 100% |
+
+> FAISS retrieves by content similarity — at small k it misses CF-relevant items not near the content profile. Fix for production: index MF item embeddings in FAISS so retrieval is CF-aligned.
+
 ## Experiment Tracking
 
 ```bash
