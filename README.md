@@ -45,16 +45,25 @@ http://files.grouplens.org/datasets/movielens/ml-1m.zip
 
 ## Results
 
-| Model          | NDCG@10 | MAP  | Recall@5 |
-|----------------|---------|------|----------|
-| User-User CF   | —       | —    | —        |
-| Item-Item CF   | —       | —    | —        |
-| SVD            | —       | —    | —        |
-| MF (PyTorch)   | —       | —    | —        |
-| Content-Based  | —       | —    | —        |
-| **Hybrid**     | —       | —    | —        |
+Evaluated on 200 validation users (Precision@10). Full NDCG/MAP/Recall metrics coming in Phase 7.
 
-_Results populated after training (Phase 7)._
+| Model                    | P@10   | Notes |
+|--------------------------|--------|-------|
+| User-User CF             | 0.0015 | Noisy on sparse users |
+| Item-Item CF             | 0.0855 | Best single model |
+| Matrix Factorization     | 0.0070 | PyTorch, 64 factors, best val RMSE=0.8822 |
+| TF-IDF Content           | 0.0160 | Genres + title, 500 features |
+| Sentence-Transformer     | 0.0060 | all-MiniLM-L6-v2, d=384 |
+| **Hybrid (α=1.0)**       | **0.0855** | CF dominates on dense MovieLens-1M |
+
+> Content signal adds noise on this dense dataset. Alpha tuning showed monotonic improvement toward pure CF — content would provide lift on sparser datasets or cold-start users (see Phase 10).
+
+### FAISS Retrieval (Phase 5)
+| Metric | Value |
+|---|---|
+| Index build time | 0.19s (3,883 vectors, d=384) |
+| Retrieval latency (k=50) | 0.238 ms |
+| Queries per second | 4,209 |
 
 ## A/B Test
 

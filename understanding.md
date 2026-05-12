@@ -229,9 +229,51 @@ Content models only see what a movie *is* (genres, title). CF models see what us
 
 ---
 
-## Phase 6: Hybrid Model 🔲
+## Phase 6: Hybrid Model ✅
 
-_To be filled after Phase 6 is complete._
+### What we did
+- Implemented `HybridRecommender` and score helpers in `src/hybrid.py`
+- Created `notebooks/06_hybrid.ipynb` — sweeps alpha 0.0→1.0 on 200 val users, plots P@10 vs alpha, reports best alpha
+
+### How it works
+1. For each user, compute a full score vector over all unseen items from **both** models:
+   - `_cf_scores_full()` — runs the Item-Item CF scoring loop over all items (same as `recommend()` but without the top-k cut), returns `{movieId: score}`
+   - `_content_scores_full()` — computes `item_embs @ user_profile` for all movies, returns `{movieId: cosine_sim}`
+2. Take the **intersection** of movie IDs both models can score
+3. **Min-max normalize** each score vector independently to [0, 1]
+4. Combine: `hybrid = alpha * cf_norm + (1 − alpha) * content_norm`
+5. Return top-N by hybrid score
+
+### Alpha tuning
+Instead of calling `recommend()` 11 times per user, we precompute both score dicts once per user and reuse them across all alpha values — 11× faster sweep.
+
+### Results
+| alpha | P@10 |
+|---|---|
+| 0.0 (pure content) | 0.0060 |
+| 0.1 | 0.0240 |
+| 0.2 | 0.0430 |
+| 0.3 | 0.0600 |
+| 0.4 | 0.0720 |
+| 0.5 | 0.0795 |
+| 0.6 | 0.0810 |
+| 0.7 | 0.0835 |
+| 0.8 | 0.0845 |
+| 0.9 | 0.0845 |
+| **1.0 (pure CF)** | **0.0855** |
+
+Best alpha = 1.0 — the hybrid does not improve over pure Item-Item CF.
+
+### Why CF dominates completely
+- MovieLens-1M is a **dense** dataset (~165 ratings/user, ~270 ratings/movie). In this regime, collaborative signal is extremely strong
+- The content features (genre tags + title) are short and keyword-heavy — they capture *what category* a movie is, not *how good* it is
+- Content would provide lift on **sparse** datasets, **new items** (no ratings yet), or **cold-start users** (< 5 ratings) — exactly what Phase 10 targets
+
+### Concepts to remember
+- **Hybrid systems don't always win**: on dense data, the weaker model degrades the stronger one. Hybridization pays off when models have complementary strengths (e.g. CF strong on popular items, content strong on long-tail)
+- **Min-max normalization before blending**: raw CF scores (weighted avg ratings, ~0–5) and content scores (cosine similarity, ~0–1) live on different scales. Normalize first so neither dominates by magnitude
+- **Intersection vs union**: we use the intersection of movie IDs both models cover. Union would require a fallback score for missing movies (e.g. 0 or the min), which can introduce bias
+- **Alpha as A/B test variable**: alpha is exactly the knob you'd expose in an A/B test — control (alpha=1, pure CF) vs treatment (alpha=0.6, hybrid). Phase 8 formalizes this
 
 ---
 
